@@ -1,0 +1,182 @@
+-- Scam GUI System (Improved)
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+-- UI Setup
+local screenGui = Instance.new("ScreenGui", playerGui)
+screenGui.Name = "ScamStatusGui"
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+local frame = Instance.new("Frame", screenGui)
+frame.Size = UDim2.new(0.2, 0, 0.12, 0) -- Increased size
+frame.Position = UDim2.new(0.01, 0, 0.86, 0) -- Slightly moved up
+frame.BackgroundColor3 = Color3.new(1, 1, 1)
+
+Instance.new("UICorner", frame)
+
+local function createLabel(name, yScale, text)
+	local lbl = Instance.new("TextLabel", frame)
+	lbl.Name = name
+	lbl.BackgroundTransparency = 1
+	lbl.Position = UDim2.new(0, 0, yScale, 0)
+	lbl.Size = UDim2.new(1, 0, 0.3, 0)
+	lbl.Font = Enum.Font.PermanentMarker
+	lbl.TextColor3 = Color3.new(0, 0, 0)
+	lbl.TextScaled = true
+	lbl.TextWrapped = true
+	lbl.TextXAlignment = Enum.TextXAlignment.Left
+	lbl.Text = text
+	return lbl
+end
+
+local labelOnBoard = createLabel("OnBoardLabel", 0, "On a board: false")
+local labelOtherAccepted = createLabel("OtherSideLabel", 0.3, "Other side accepted: false")
+local labelScamEnabled = createLabel("ScamEnabledLabel", 0.58, "Scam is enabled: false (G to toggle)")
+
+-- States
+local state = {
+	OnBoard = Instance.new("BoolValue", frame),
+	OtherSideAccepted = Instance.new("BoolValue", frame),
+	ScamEnabled = Instance.new("BoolValue", frame),
+	Board = Instance.new("ObjectValue", frame),
+	YourSide = Instance.new("ObjectValue", frame),
+	TheirSide = Instance.new("ObjectValue", frame),
+}
+
+state.OnBoard.Name = "OnBoard"
+state.OtherSideAccepted.Name = "OtherSideAccepted"
+state.ScamEnabled.Name = "ScamEnabled"
+state.Board.Name = "Board"
+state.YourSide.Name = "YourSide"
+state.TheirSide.Name = "TheirSide"
+
+-- Label Updater
+local function updateLabels()
+	labelOnBoard.Text = "On a board: " .. tostring(state.OnBoard.Value)
+	labelOtherAccepted.Text = "Other side accepted: " .. tostring(state.OtherSideAccepted.Value)
+	labelScamEnabled.Text = "Scam is enabled: " .. tostring(state.ScamEnabled.Value) .. " (G to toggle)"
+end
+
+for _, v in pairs({ state.OnBoard, state.OtherSideAccepted, state.ScamEnabled }) do
+	v.Changed:Connect(updateLabels)
+end
+updateLabels()
+
+-- Input Listener
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+	if gameProcessed then return end
+	if input.KeyCode == Enum.KeyCode.G then
+		state.ScamEnabled.Value = not state.ScamEnabled.Value
+	elseif input.KeyCode == Enum.KeyCode.F then
+		screenGui:Destroy()
+	end
+end)
+
+-- Scan for Board
+local function refreshBoardState()
+	local boardsFolder = workspace:FindFirstChild("Boards")
+	if not boardsFolder then
+		state.OnBoard.Value = false
+		return
+	end
+
+	for _, board in pairs(boardsFolder:GetChildren()) do
+		if board:FindFirstChild("Player1") and board:FindFirstChild("Player2") then
+			if board.Player1.Value == player or board.Player2.Value == player then
+				state.Board.Value = board
+				local isPlayer1 = board.Player1.Value == player
+				state.YourSide.Value = board:FindFirstChild(isPlayer1 and "Player1Action" or "Player2Action")
+				state.TheirSide.Value = board:FindFirstChild(isPlayer1 and "Player2Action" or "Player1Action")
+				state.OnBoard.Value = true
+				return
+			end
+		end
+	end
+
+	state.OnBoard.Value = false
+end
+
+-- Check if Other Side Accepted
+local function updateOtherSideAccepted()
+	local theirSide = state.TheirSide.Value
+	state.OtherSideAccepted.Value = theirSide and theirSide.Value == "Done"
+end
+
+-- Item Pickup
+local function pickupItems()
+	local droppedFolder = workspace:FindFirstChild("Dropped")
+	if not droppedFolder then return end
+
+	local char = player.Character
+	if not char then return end
+
+	for _, item in pairs(droppedFolder:GetChildren()) do
+		if item:FindFirstChild("Owner") and (item.Owner.Value == player or item.Owner.Value == char) then
+			local handle = item:FindFirstChild("Handle")
+			if handle then
+				for _, part in pairs(char:GetChildren()) do
+					if part:IsA("BasePart") then
+						firetouchinterest(part, handle, 1)
+						firetouchinterest(part, handle, 0)
+					end
+				end
+			end
+		end
+	end
+end
+
+-- Scam Execution
+local function tryExecuteScam()
+	if not (state.ScamEnabled.Value and state.OnBoard.Value and state.OtherSideAccepted.Value) then return end
+
+	local board = state.Board.Value
+	if not board then return end
+
+	local pad = board:FindFirstChild("Controls") and board.Controls:FindFirstChild("Done") and board.Controls.Done:FindFirstChild("Pad")
+	if not pad then return end
+
+	local char = player.Character or player.CharacterAdded:Wait()
+	local hrp = char:FindFirstChild("HumanoidRootPart")
+	if not hrp then return end
+
+	-- Teleport to pad
+	hrp.CFrame = pad.CFrame + Vector3.new(0, 4, 0)
+	wait(0.2)
+
+	-- Grab items
+	pickupItems()
+
+	-- Fake jump spam
+	local jumpRemote = ReplicatedStorage:FindFirstChild("RemoteEvents") and ReplicatedStorage.RemoteEvents:FindFirstChild("Jumped")
+	if jumpRemote then
+		local jumping = true
+		spawn(function()
+			while jumping do
+				jumpRemote:FireServer()
+				wait(0.2)
+			end
+		end)
+		wait(3)
+		jumping = false
+	end
+
+	-- Return to MAIN
+	local mainPad = board:FindFirstChild("MAIN")
+	if mainPad then
+		hrp.CFrame = mainPad.CFrame + Vector3.new(0, 4, 0)
+	end
+
+	state.ScamEnabled.Value = false
+end
+
+-- Main loop
+RunService.Heartbeat:Connect(function()
+	refreshBoardState()
+	updateOtherSideAccepted()
+	tryExecuteScam()
+end)
